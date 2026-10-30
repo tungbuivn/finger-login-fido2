@@ -14,12 +14,12 @@ Cập nhật: 2026-10-30
 
 | Mục | Kết quả |
 |---|---|
-| Secure Boot | Không xác định / không hỗ trợ qua lệnh |
-| Test signing | **Chưa bật** |
+| Secure Boot | **UEFISecureBootEnabled=0** (đã tắt) |
+| Test signing | **Đã bật** (`testsigning Yes`), cần reboot |
 | WDK/`vhf.h` | Có (WDK 10.0.26100, `vhfkm.lib`) |
 | SDK/WDK | 10.0.26100.0 |
 | Visual Studio | BuildTools 2022 |
-| devcon | **Chưa có trong PATH** |\n| Driver VHF | **Compile OK** (`driver\build\fido2.sys`) |\n| Load driver | Chưa (test signing off) |
+| devcon | Có: `C:\Program Files (x86)\Windows Kits\10\Tools\10.0.26100.0\x64\devcon.exe` |\n| Driver VHF | **Compile OK** (`driver\build\fido2.sys`, 17.9 KB) |\n| Load driver | Chưa; cần reboot rồi `devcon install` |
 | Browser | Edge có; Chrome chưa thấy ở đường dẫn chuẩn |
 
 ## Việc tiếp theo
