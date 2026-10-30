@@ -39,3 +39,11 @@ Cập nhật: 2026-10-30
 - [ ] Phase 4 makeCredential
 - [ ] Phase 5 getAssertion
 - [ ] Phase 6 WebAuthn test
+
+## USB/IP path (2026-10-30)
+
+- usbip-win2 VHCI + virtual-fido (Go) attach OK
+- Windows sees USB `HID-compliant fido` (VID_0000)
+- Chrome sends CTAPHID INIT/getInfo over USB
+- Chrome does not send makeCredential yet (WebAuthn chooser/user presence)
+- VHF device disabled during USB/IP test
