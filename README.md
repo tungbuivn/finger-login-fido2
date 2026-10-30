@@ -41,6 +41,7 @@ fido2/
     05-HID-DESCRIPTOR.md
     06-TEST-PLAN.md
     07-RESUME-CHECKLIST.md
+    08-KERNEL-DEBUG.md
   driver/    # WDF/VHF driver (chưa code)
   service/   # user-mode CTAP2 service (chưa code)
   tools/     # devcon/hid test scripts
