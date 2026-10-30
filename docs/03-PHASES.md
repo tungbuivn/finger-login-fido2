@@ -16,8 +16,8 @@
 
 ## Phase 1 — Virtual FIDO HID device
 
-- [ ] Driver WDF tạo VHF device
-- [ ] Report descriptor FIDO (Usage Page 0xF1D0, Usage 0x01)
+- [x] Driver WDF code tạo VHF device (compile)
+- [x] Report descriptor FIDO trong code
 - [ ] Input + Output report 64 byte
 - [ ] Device Manager thấy HID device
 - [ ] `hidfido` bind (nếu descriptor đúng)

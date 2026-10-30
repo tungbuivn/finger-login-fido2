@@ -16,10 +16,10 @@ Cập nhật: 2026-10-30
 |---|---|
 | Secure Boot | Không xác định / không hỗ trợ qua lệnh |
 | Test signing | **Chưa bật** |
-| WDK `vhf.h` | Có: `C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared\vhf.h` |
+| WDK/`vhf.h` | Có (WDK 10.0.26100, `vhfkm.lib`) |
 | SDK/WDK | 10.0.26100.0 |
 | Visual Studio | BuildTools 2022 |
-| devcon | **Chưa có trong PATH** |
+| devcon | **Chưa có trong PATH** |\n| Driver VHF | **Compile OK** (`driver\build\fido2.sys`) |\n| Load driver | Chưa (test signing off) |
 | Browser | Edge có; Chrome chưa thấy ở đường dẫn chuẩn |
 
 ## Việc tiếp theo
@@ -33,7 +33,7 @@ Cập nhật: 2026-10-30
 
 - [x] Tài liệu
 - [ ] Phase 0 môi trường
-- [ ] Phase 1 VHF HID
+- [x] Phase 1 code compile\n- [ ] Phase 1 load/enumerate
 - [ ] Phase 2 CTAPHID
 - [ ] Phase 3 getInfo
 - [ ] Phase 4 makeCredential

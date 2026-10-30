@@ -15,3 +15,7 @@ out/
 
 # test artifacts
 tests/logs/
+
+.refs/
+wdk-install.log
+

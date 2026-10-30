@@ -1,0 +1,51 @@
+; fido2.inf - Phase 1 virtual FIDO HID (VHF), test signing only.
+[Version]
+Signature="$WINDOWS NT$"
+Class=HIDClass
+ClassGuid={745A17A0-74D3-11D0-B6FE-00A0C90F57DA}
+Provider=%Provider%
+CatalogFile=fido2.cat
+DriverVer=10/30/2026,0.1.0.0
+PnpLockdown=1
+
+[Manufacturer]
+%Mfg%=Fido2,NTamd64
+
+[Fido2.NTamd64]
+%DeviceDesc%=Fido2_Install, Root\Fido2Virtual
+
+[Fido2_Install.NT]
+CopyFiles=Fido2.CopyFiles
+AddReg=Fido2.AddReg
+
+[Fido2_Install.NT.HW]
+AddReg=Fido2.HW
+
+[Fido2_Install.NT.Services]
+AddService=Fido2,0x00000002,Fido2.Service
+
+[Fido2.CopyFiles]
+fido2.sys
+
+[DestinationDirs]
+Fido2.CopyFiles=12
+
+[Fido2.AddReg]
+HKR,,Driver,,fido2.sys
+
+[Fido2.HW]
+HKR,,HardwareID,%REG_MULTI_SZ%,"Root\Fido2Virtual"
+
+[Fido2.Service]
+DisplayName=%ServiceDesc%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%12%\fido2.sys
+
+[Strings]
+Provider="FIDO2 Virtual"
+Mfg="FIDO2 Virtual"
+DeviceDesc="FIDO2 Virtual Authenticator"
+ServiceDesc="FIDO2 Virtual Authenticator Driver"
+REG_MULTI_SZ=0x00010000
