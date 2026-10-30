@@ -1,0 +1,17 @@
+﻿# build output
+build/
+out/
+*.log
+*.user
+*.suo
+*.obj
+*.sys
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.cer
+*.cat
+
+# test artifacts
+tests/logs/
