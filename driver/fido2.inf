@@ -17,12 +17,19 @@ PnpLockdown=1
 [Fido2_Install.NT]
 CopyFiles=Fido2.CopyFiles
 AddReg=Fido2.AddReg
+KmdfLibraryVersion=1.35
 
 [Fido2_Install.NT.HW]
 AddReg=Fido2.HW
 
 [Fido2_Install.NT.Services]
 AddService=Fido2,0x00000002,Fido2.Service
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+fido2.sys=1
 
 [Fido2.CopyFiles]
 fido2.sys
@@ -49,3 +56,4 @@ Mfg="FIDO2 Virtual"
 DeviceDesc="FIDO2 Virtual Authenticator"
 ServiceDesc="FIDO2 Virtual Authenticator Driver"
 REG_MULTI_SZ=0x00010000
+DiskName="FIDO2 Virtual Driver"
