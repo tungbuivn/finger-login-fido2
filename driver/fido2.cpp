@@ -17,6 +17,18 @@ typedef struct _DEVICE_CONTEXT {
     PDEVICE_OBJECT Pdo;
 } DEVICE_CONTEXT, *PDEVICE_CONTEXT;
 
+#define FIDO2_IOCTL_GET_OUTPUT \
+    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_READ_DATA)
+#define FIDO2_IOCTL_SEND_INPUT \
+    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_WRITE_DATA)
+
+static PDEVICE_OBJECT g_ControlDevice = nullptr;
+static PDEVICE_CONTEXT g_Ctx = nullptr;
+static KSPIN_LOCK g_Lock;
+static UCHAR g_Queue[16][64];
+static ULONG g_Head = 0;
+static ULONG g_Tail = 0;
+
 static const UCHAR g_ReportDescriptor[] = {
     0x06, 0xD0, 0xF1,
     0x09, 0x01,
@@ -63,7 +75,21 @@ static void Stage(const char* name, NTSTATUS st) {
 
 VOID EvtVhfReady(PVOID ctx) { UNREFERENCED_PARAMETER(ctx); }
 VOID EvtVhfWrite(PVOID ctx, VHFOPERATIONHANDLE op, PVOID opCtx, PHID_XFER_PACKET pkt) {
-    UNREFERENCED_PARAMETER(ctx); UNREFERENCED_PARAMETER(opCtx); UNREFERENCED_PARAMETER(pkt);
+    UNREFERENCED_PARAMETER(ctx); UNREFERENCED_PARAMETER(opCtx);
+    if (pkt && pkt->reportBuffer && pkt->reportBufferLen >= 64) {
+        const UCHAR* p = (const UCHAR*)pkt->reportBuffer;
+        ULONG n = pkt->reportBufferLen;
+        if (n == 65 && p[0] == 0) { p++; n = 64; }
+        KIRQL old;
+        KeAcquireSpinLock(&g_Lock, &old);
+        ULONG next = (g_Head + 1) % 16;
+        if (next != g_Tail) {
+            RtlZeroMemory(g_Queue[g_Head], 64);
+            RtlCopyMemory(g_Queue[g_Head], p, n < 64 ? n : 64);
+            g_Head = next;
+        }
+        KeReleaseSpinLock(&g_Lock, old);
+    }
     VhfAsyncOperationComplete(op, STATUS_SUCCESS);
 }
 VOID EvtVhfGetFeature(PVOID ctx, VHFOPERATIONHANDLE op, PVOID opCtx, PHID_XFER_PACKET pkt) {
@@ -104,6 +130,53 @@ static NTSTATUS DispatchPass(PDEVICE_OBJECT dev, PIRP irp) {
     auto* ctx = (PDEVICE_CONTEXT)dev->DeviceExtension;
     IoSkipCurrentIrpStackLocation(irp);
     return IoCallDriver(ctx->Lower, irp);
+}
+
+static NTSTATUS DispatchControl(PDEVICE_OBJECT dev, PIRP irp) {
+    UNREFERENCED_PARAMETER(dev);
+    auto* stack = IoGetCurrentIrpStackLocation(irp);
+    NTSTATUS status = STATUS_INVALID_DEVICE_REQUEST;
+    ULONG info = 0;
+
+    if (stack->MajorFunction == IRP_MJ_CREATE || stack->MajorFunction == IRP_MJ_CLOSE) {
+        status = STATUS_SUCCESS;
+    } else if (stack->MajorFunction == IRP_MJ_DEVICE_CONTROL) {
+        ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
+        if (!g_Ctx) {
+            status = STATUS_DEVICE_NOT_READY;
+        } else if (code == FIDO2_IOCTL_GET_OUTPUT) {
+            if (stack->Parameters.DeviceIoControl.OutputBufferLength < 64) {
+                status = STATUS_BUFFER_TOO_SMALL;
+            } else {
+                KIRQL old;
+                KeAcquireSpinLock(&g_Lock, &old);
+                if (g_Head == g_Tail) {
+                    status = STATUS_NO_MORE_ENTRIES;
+                } else {
+                    RtlCopyMemory(irp->AssociatedIrp.SystemBuffer, g_Queue[g_Tail], 64);
+                    g_Tail = (g_Tail + 1) % 16;
+                    info = 64;
+                    status = STATUS_SUCCESS;
+                }
+                KeReleaseSpinLock(&g_Lock, old);
+            }
+        } else if (code == FIDO2_IOCTL_SEND_INPUT) {
+            if (stack->Parameters.DeviceIoControl.InputBufferLength < 64) {
+                status = STATUS_BUFFER_TOO_SMALL;
+            } else {
+                HID_XFER_PACKET pkt = {};
+                pkt.reportBuffer = (PUCHAR)irp->AssociatedIrp.SystemBuffer;
+                pkt.reportBufferLen = 64;
+                pkt.reportId = 0;
+                status = VhfReadReportSubmit(g_Ctx->Vhf, &pkt);
+            }
+        }
+    }
+
+    irp->IoStatus.Status = status;
+    irp->IoStatus.Information = info;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
+    return status;
 }
 
 static NTSTATUS AddDevice(PDRIVER_OBJECT driver, PDEVICE_OBJECT pdo) {
@@ -161,11 +234,20 @@ static NTSTATUS AddDevice(PDRIVER_OBJECT driver, PDEVICE_OBJECT pdo) {
         return status;
     }
     FileLog("ready\r\n");
+    g_Ctx = ctx;
     return STATUS_SUCCESS;
 }
 
 static VOID DriverUnload(PDRIVER_OBJECT driver) {
     FileLog("unload\r\n");
+    g_Ctx = nullptr;
+    if (g_ControlDevice) {
+        UNICODE_STRING symName;
+        RtlInitUnicodeString(&symName, L"\\DosDevices\\Fido2Ctl");
+        IoDeleteSymbolicLink(&symName);
+        IoDeleteDevice(g_ControlDevice);
+        g_ControlDevice = nullptr;
+    }
     PDEVICE_OBJECT dev = driver->DeviceObject;
     while (dev) {
         PDEVICE_OBJECT next = dev->NextDevice;
@@ -186,10 +268,26 @@ static VOID DriverUnload(PDRIVER_OBJECT driver) {
 extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registry) {
     UNREFERENCED_PARAMETER(registry);
     FileLog("entry\r\n");
+    KeInitializeSpinLock(&g_Lock);
     driver->DriverUnload = DriverUnload;
     driver->DriverExtension->AddDevice = AddDevice;
     driver->MajorFunction[IRP_MJ_PNP] = DispatchPnp;
     driver->MajorFunction[IRP_MJ_POWER] = DispatchPower;
     driver->MajorFunction[IRP_MJ_SYSTEM_CONTROL] = DispatchPass;
-    return STATUS_SUCCESS;
+    driver->MajorFunction[IRP_MJ_CREATE] = DispatchControl;
+    driver->MajorFunction[IRP_MJ_CLOSE] = DispatchControl;
+    driver->MajorFunction[IRP_MJ_DEVICE_CONTROL] = DispatchControl;
+
+    UNICODE_STRING devName, symName;
+    RtlInitUnicodeString(&devName, L"\\Device\\Fido2Ctl");
+    RtlInitUnicodeString(&symName, L"\\DosDevices\\Fido2Ctl");
+    NTSTATUS status = IoCreateDevice(driver, 0, &devName, FILE_DEVICE_UNKNOWN,
+                                     FILE_DEVICE_SECURE_OPEN, FALSE, &g_ControlDevice);
+    Stage("ctldev", status);
+    if (NT_SUCCESS(status)) {
+        g_ControlDevice->Flags |= DO_BUFFERED_IO;
+        status = IoCreateSymbolicLink(&symName, &devName);
+        Stage("ctlsym", status);
+    }
+    return NT_SUCCESS(status) ? STATUS_SUCCESS : status;
 }

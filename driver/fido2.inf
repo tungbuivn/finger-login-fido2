@@ -5,7 +5,7 @@ Class=HIDClass
 ClassGuid={745A17A0-74D3-11D0-B6FE-00A0C90F57DA}
 Provider=%Provider%
 CatalogFile=fido2.cat
-DriverVer=10/30/2026,0.1.0.1
+DriverVer=10/30/2026,0.2.0.1
 PnpLockdown=1
 
 [Manufacturer]
@@ -22,22 +22,22 @@ AddReg=Fido2.AddReg
 AddReg=Fido2.HW
 
 [Fido2_Install.NT.Services]
-AddService=fido2fido,0x00000002,Fido2.Service
+AddService=fido2ctl2,0x00000002,Fido2.Service
 
 [SourceDisksNames]
 1 = %DiskName%,,,""
 
 [SourceDisksFiles]
-fido2fido.sys=1
+fido2ctl2.sys=1
 
 [Fido2.CopyFiles]
-fido2fido.sys
+fido2ctl2.sys
 
 [DestinationDirs]
 Fido2.CopyFiles=12
 
 [Fido2.AddReg]
-HKR,,Driver,,fido2fido.sys
+HKR,,Driver,,fido2ctl2.sys
 
 [Fido2.HW]
 HKR,,"LowerFilters",0x00010000,"vhf"
@@ -48,7 +48,7 @@ DisplayName=%ServiceDesc%
 ServiceType=1
 StartType=3
 ErrorControl=1
-ServiceBinary=%12%\fido2fido.sys
+ServiceBinary=%12%\fido2ctl2.sys
 
 [Strings]
 Provider="FIDO2 Virtual"
