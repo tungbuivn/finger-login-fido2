@@ -133,14 +133,23 @@ struct Key {
 
 static bool make_key(Key& k) {
     static BCRYPT_ALG_HANDLE prov = nullptr;
-    if (!prov && !BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(&prov, BCRYPT_ECDSA_P256_ALGORITHM, nullptr, 0)))
-        return false;
-    if (!BCRYPT_SUCCESS(BCryptGenerateKeyPair(prov, &k.h, 256, 0))) return false;
-    if (!BCRYPT_SUCCESS(BCryptFinalizeKeyPair(k.h, 0))) return false;
+    NTSTATUS st = 0;
+    if (!prov) {
+        st = BCryptOpenAlgorithmProvider(&prov, BCRYPT_ECDSA_P256_ALGORITHM, nullptr, 0);
+        std::printf("make_key open=%08X prov=%p\n", (unsigned)st, prov);
+        if (!BCRYPT_SUCCESS(st)) return false;
+    }
+    st = BCryptGenerateKeyPair(prov, &k.h, 256, 0);
+    std::printf("make_key gen=%08X handle=%p\n", (unsigned)st, k.h);
+    if (!BCRYPT_SUCCESS(st)) return false;
+    st = BCryptFinalizeKeyPair(k.h, 0);
+    std::printf("make_key final=%08X\n", (unsigned)st);
+    if (!BCRYPT_SUCCESS(st)) return false;
     uint8_t blob[128] = {};
     ULONG len = 0;
-    if (!BCRYPT_SUCCESS(BCryptExportKey(k.h, nullptr, BCRYPT_ECCPUBLIC_BLOB, blob, sizeof(blob), &len, 0)))
-        return false;
+    st = BCryptExportKey(k.h, nullptr, BCRYPT_ECCPUBLIC_BLOB, blob, sizeof(blob), &len, 0);
+    std::printf("make_key export=%08X len=%lu\n", (unsigned)st, (unsigned long)len);
+    if (!BCRYPT_SUCCESS(st)) return false;
     auto* hdr = (BCRYPT_ECCKEY_BLOB*)blob;
     if (hdr->cbKey != 32 || len < 8 + 64) return false;
     k.x.assign(blob + 8, blob + 40);
@@ -218,6 +227,7 @@ static std::vector<uint8_t> make_credential(const Cbor& req) {
     auto* cdh = req.getInt(1);
     auto* rp = req.getInt(2);
     auto* user = req.getInt(3);
+    std::printf("make cdh=%p rp=%p user=%p\n", (void*)cdh, (void*)rp, (void*)user);
     if (!cdh || cdh->type != Cbor::Bytes || cdh->bytes.size() != 32) return { 0x01 };
     if (!rp || rp->type != Cbor::Map) return { 0x02 };
     auto* rpId = rp->getText("id");
@@ -321,7 +331,10 @@ std::vector<uint8_t> ctap2_handle(uint8_t cmd, const uint8_t* data, size_t len) 
     Cbor req;
     const uint8_t* p = data;
     const uint8_t* e = data + len;
-    if (!decode(p, e, req)) return { 0x01 };
+    if (!decode(p, e, req)) {
+        std::printf("decode failed at offset %td/%zu\n", p - data, len);
+        return { 0x01 };
+    }
     if (cmd == 0x01) return make_credential(req);
     if (cmd == 0x02) return get_assertion(req);
     return { 0x01 };

@@ -35,7 +35,7 @@ Cập nhật: 2026-10-30
 - [ ] Phase 0 môi trường
 - [x] Phase 1 code compile\n- [ ] Phase 1 load/enumerate
 - [x] Phase 2 CTAPHID INIT/PING
-- [x] Phase 3 getInfo\n- [ ] Phase 4 makeCredential/GetAssertion
+- [x] Phase 3 getInfo\n- [x] makeCredential tạo response 177 (status 00)\n- [ ] WebAuthn browser test
 - [ ] Phase 4 makeCredential
 - [ ] Phase 5 getAssertion
 - [ ] Phase 6 WebAuthn test

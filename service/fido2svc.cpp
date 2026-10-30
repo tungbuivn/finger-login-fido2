@@ -27,6 +27,23 @@ static void dump(const char* tag, const uint8_t* p, size_t n) {
     std::printf("\n");
 }
 
+static bool send_one(const uint8_t* pkt) {
+    for (int i = 0; i < 200; ++i) {
+        DWORD ret = 0;
+        if (DeviceIoControl(g_ctl, FIDO2_IOCTL_SEND_INPUT, (LPVOID)pkt, 64,
+                            nullptr, 0, &ret, nullptr))
+            return true;
+        DWORD err = GetLastError();
+        if (err != ERROR_BUSY && err != ERROR_RETRY) {
+            std::printf("SEND input failed: %lu\n", err);
+            return false;
+        }
+        Sleep(5);
+    }
+    std::printf("SEND input busy timeout\n");
+    return false;
+}
+
 static bool send_frame(uint32_t cid, uint8_t cmd, const uint8_t* data, size_t len) {
     uint8_t pkt[64];
     std::memset(pkt, 0, sizeof(pkt));
@@ -34,15 +51,10 @@ static bool send_frame(uint32_t cid, uint8_t cmd, const uint8_t* data, size_t le
     pkt[2] = (uint8_t)(cid >> 8);  pkt[3] = (uint8_t)cid;
     pkt[4] = cmd;
     pkt[5] = (uint8_t)(len >> 8); pkt[6] = (uint8_t)len;
-    size_t off = 0;
     size_t first = len < 57 ? len : 57;
     std::memcpy(pkt + 7, data, first);
-    off = first;
-    DWORD ret = 0;
-    if (!DeviceIoControl(g_ctl, FIDO2_IOCTL_SEND_INPUT, pkt, 64, nullptr, 0, &ret, nullptr)) {
-        std::printf("SEND input failed: %lu\n", GetLastError());
-        return false;
-    }
+    if (!send_one(pkt)) return false;
+    size_t off = first;
     uint8_t seq = 0;
     while (off < len) {
         std::memset(pkt, 0, sizeof(pkt));
@@ -52,19 +64,17 @@ static bool send_frame(uint32_t cid, uint8_t cmd, const uint8_t* data, size_t le
         size_t n = len - off < 59 ? len - off : 59;
         std::memcpy(pkt + 5, data + off, n);
         off += n;
-        if (!DeviceIoControl(g_ctl, FIDO2_IOCTL_SEND_INPUT, pkt, 64, nullptr, 0, &ret, nullptr)) {
-            std::printf("SEND cont failed: %lu\n", GetLastError());
-            return false;
-        }
+        if (!send_one(pkt)) return false;
     }
     return true;
 }
-
 static void handle_cbor(uint32_t cid, const uint8_t* data, size_t len) {
     if (len < 1) return;
     dump("CTAP2", data, len);
     auto out = ctap2_handle(data[0], data + 1, len - 1);
-    send_frame(cid, 0x90, out.data(), out.size());
+    std::printf("CTAP2 out len=%zu first=%02X\n", out.size(), out.empty() ? 0 : out[0]);
+    bool ok = send_frame(cid, 0x90, out.data(), out.size());
+    std::printf("CTAP2 send=%d\n", ok ? 1 : 0);
 }
 static void handle_message(uint32_t cid, uint8_t cmd, const uint8_t* data, size_t len) {
     dump("HOST", data, len);
@@ -97,8 +107,11 @@ static void process_packet(const uint8_t* pkt) {
     uint32_t cid = ((uint32_t)pkt[0] << 24) | ((uint32_t)pkt[1] << 16) |
                    ((uint32_t)pkt[2] << 8) | pkt[3];
     uint8_t cmd = pkt[4];
+    std::printf("PKT cid=%08X cmd=%02X len=%u raw=%02X %02X %02X %02X %02X %02X %02X\n", cid, cmd,
+                (unsigned)(((unsigned)pkt[5] << 8) | pkt[6]),
+                pkt[0], pkt[1], pkt[2], pkt[3], pkt[4], pkt[5], pkt[6]);
 
-    if (cmd != 0) {
+    if (cmd & 0x80) {
         g_inCid = cid;
         g_inCmd = cmd;
         g_inExpected = ((size_t)pkt[5] << 8) | pkt[6];

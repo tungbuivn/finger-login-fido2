@@ -28,6 +28,10 @@ static KSPIN_LOCK g_Lock;
 static UCHAR g_Queue[16][64];
 static ULONG g_Head = 0;
 static ULONG g_Tail = 0;
+static UCHAR g_InQueue[16][64];
+static ULONG g_InHead = 0;
+static ULONG g_InTail = 0;
+static BOOLEAN g_VhfReady = FALSE;
 
 static const UCHAR g_ReportDescriptor[] = {
     0x06, 0xD0, 0xF1,
@@ -73,7 +77,13 @@ static void Stage(const char* name, NTSTATUS st) {
     FileLog(b);
 }
 
-VOID EvtVhfReady(PVOID ctx) { UNREFERENCED_PARAMETER(ctx); }
+VOID EvtVhfReady(PVOID ctx) {
+    UNREFERENCED_PARAMETER(ctx);
+    KIRQL old;
+    KeAcquireSpinLock(&g_Lock, &old);
+    g_VhfReady = TRUE;
+    KeReleaseSpinLock(&g_Lock, old);
+}
 VOID EvtVhfWrite(PVOID ctx, VHFOPERATIONHANDLE op, PVOID opCtx, PHID_XFER_PACKET pkt) {
     UNREFERENCED_PARAMETER(ctx); UNREFERENCED_PARAMETER(opCtx);
     if (pkt && pkt->reportBuffer && pkt->reportBufferLen >= 64) {
@@ -164,11 +174,30 @@ static NTSTATUS DispatchControl(PDEVICE_OBJECT dev, PIRP irp) {
             if (stack->Parameters.DeviceIoControl.InputBufferLength < 64) {
                 status = STATUS_BUFFER_TOO_SMALL;
             } else {
-                HID_XFER_PACKET pkt = {};
-                pkt.reportBuffer = (PUCHAR)irp->AssociatedIrp.SystemBuffer;
-                pkt.reportBufferLen = 64;
-                pkt.reportId = 0;
-                status = VhfReadReportSubmit(g_Ctx->Vhf, &pkt);
+                UCHAR buf[64];
+                BOOLEAN ready = FALSE;
+                KIRQL old;
+                KeAcquireSpinLock(&g_Lock, &old);
+                if (g_VhfReady) {
+                    g_VhfReady = FALSE;
+                    RtlCopyMemory(buf, irp->AssociatedIrp.SystemBuffer, 64);
+                    ready = TRUE;
+                    status = STATUS_SUCCESS;
+                } else {
+                    status = STATUS_DEVICE_BUSY;
+                }
+                KeReleaseSpinLock(&g_Lock, old);
+                if (ready) {
+                    HID_XFER_PACKET pkt = {};
+                    pkt.reportBuffer = buf;
+                    pkt.reportBufferLen = 64;
+                    status = VhfReadReportSubmit(g_Ctx->Vhf, &pkt);
+                    if (!NT_SUCCESS(status)) {
+                        KeAcquireSpinLock(&g_Lock, &old);
+                        g_VhfReady = TRUE;
+                        KeReleaseSpinLock(&g_Lock, old);
+                    }
+                }
             }
         }
     }
@@ -233,8 +262,9 @@ static NTSTATUS AddDevice(PDRIVER_OBJECT driver, PDEVICE_OBJECT pdo) {
         IoDeleteDevice(fdo);
         return status;
     }
-    FileLog("ready\r\n");
     g_Ctx = ctx;
+    g_VhfReady = TRUE;
+    FileLog("ready\r\n");
     return STATUS_SUCCESS;
 }
 
