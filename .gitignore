@@ -22,3 +22,7 @@ wdk-install.log
 
 *.pfx
 
+virtual-fido/
+vault.json
+*.txt
+tools/cdp*.js

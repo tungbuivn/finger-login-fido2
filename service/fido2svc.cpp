@@ -72,7 +72,9 @@ static void handle_cbor(uint32_t cid, const uint8_t* data, size_t len) {
     if (len < 1) return;
     dump("CTAP2", data, len);
     auto out = ctap2_handle(data[0], data + 1, len - 1);
-    std::printf("CTAP2 out len=%zu first=%02X\n", out.size(), out.empty() ? 0 : out[0]);
+    std::printf("CTAP2 out len=%zu:", out.size());
+    for (size_t i = 0; i < out.size(); ++i) std::printf(" %02X", out[i]);
+    std::printf("\n");
     bool ok = send_frame(cid, 0x90, out.data(), out.size());
     std::printf("CTAP2 send=%d\n", ok ? 1 : 0);
 }

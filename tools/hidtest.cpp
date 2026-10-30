@@ -200,19 +200,15 @@ int main() {
     for (int i = 0; i < 16; ++i) std::printf(" %02X", in[i]);
     std::printf("\n");
 
-    uint8_t info[64] = {};
-    info[0] = (uint8_t)(cid >> 24); info[1] = (uint8_t)(cid >> 16);
-    info[2] = (uint8_t)(cid >> 8); info[3] = (uint8_t)cid;
-    info[4] = 0x90; info[5] = 0x00; info[6] = 0x01; info[7] = 0x04;
-    std::memset(outbuf, 0, sizeof(outbuf));
-    std::memcpy(outbuf + 1, info, 64);
-    if (!write_output(dev, outbuf, 65)) { std::printf("getInfo write failed: %lu\n", GetLastError()); CloseHandle(dev); return 9; }
-    if (!read_input(dev, in, 3000)) { std::printf("getInfo read failed: %lu\n", GetLastError()); CloseHandle(dev); return 10; }
-    std::printf("getInfo response:");
-    for (int i = 0; i < 32; ++i) std::printf(" %02X", in[i]);
-    std::printf("\n");
-
+    uint8_t info[1] = { 0x04 };
+    if (!send_msg(dev, cid, 0x90, info, sizeof(info))) {
+        std::printf("getInfo send failed\n"); CloseHandle(dev); return 9;
+    }
     uint8_t resp[2048] = {};
+    int glen = recv_msg(dev, cid, 0x90, resp, sizeof(resp));
+    std::printf("getInfo response len=%d status=%02X\n", glen, glen > 0 ? resp[0] : 0xFF);
+    for (int i = 0; i < (glen > 0 ? glen : 0); ++i) std::printf(" %02X", resp[i]);
+    std::printf("\n");
     while (read_input(dev, resp, 50)) {}
     uint8_t first[64] = {};
     std::atomic<bool> gotFirst{false};
