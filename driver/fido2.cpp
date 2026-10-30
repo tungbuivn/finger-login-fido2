@@ -1,127 +1,195 @@
-// fido2.c - Phase 1: virtual FIDO HID device via VHF.
+// fido2.cpp - WDM function driver for a root PDO, VHF virtual FIDO HID.
 #include <initguid.h>
-#include "fido2.h"
+#include <ntddk.h>
+#include <hidport.h>
+#include <vhf.h>
+#include <ntstrsafe.h>
 
-// FIDO HID descriptor: Usage Page 0xF1D0, Usage 0x01, 64-byte input/output.
+#define FIDO2_VID 0x1209
+#define FIDO2_PID 0xF1D0
+
+DEFINE_GUID(GUID_DEVINTERFACE_FIDO2_VIRTUAL,
+    0x7d2a6f31, 0x9e4b, 0x4b6e, 0x9f, 0x6a, 0x2f, 0x0d, 0x6a, 0x5b, 0x1c, 0x01);
+
+typedef struct _DEVICE_CONTEXT {
+    VHFHANDLE Vhf;
+    PDEVICE_OBJECT Lower;
+    PDEVICE_OBJECT Pdo;
+} DEVICE_CONTEXT, *PDEVICE_CONTEXT;
+
 static const UCHAR g_ReportDescriptor[] = {
-    0x06, 0xD0, 0xF1,        // Usage Page (FIDO)
-    0x09, 0x01,              // Usage (U2F)
-    0xA1, 0x01,              // Collection (Application)
-    0x09, 0x20,              //   Usage (Input Report Data)
-    0x15, 0x00,              //   Logical Minimum (0)
-    0x26, 0xFF, 0x00,        //   Logical Maximum (255)
-    0x75, 0x08,              //   Report Size (8)
-    0x95, 0x40,              //   Report Count (64)
-    0x81, 0x02,              //   Input (Data,Var,Abs)
-    0x09, 0x21,              //   Usage (Output Report Data)
+    0x06, 0xD0, 0xF1,
+    0x09, 0x01,
+    0xA1, 0x01,
+    0x09, 0x20,
     0x15, 0x00,
     0x26, 0xFF, 0x00,
     0x75, 0x08,
     0x95, 0x40,
-    0x91, 0x02,              //   Output (Data,Var,Abs)
-    0xC0                     // End Collection
-};
+    0x81, 0x02,
+    0x09, 0x21,
+    0x15, 0x00,
+    0x26, 0xFF, 0x00,
+    0x75, 0x08,
+    0x95, 0x40,
+    0x91, 0x02,
+    0xC0};
 
-static VOID Complete(PVOID context, VHFOPERATIONHANDLE op) {
-    UNREFERENCED_PARAMETER(context);
+static void FileLog(const char* text) {
+    UNICODE_STRING path;
+    RtlInitUnicodeString(&path, L"\\??\\C:\\fido2.log");
+    OBJECT_ATTRIBUTES oa;
+    InitializeObjectAttributes(&oa, &path, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
+                               nullptr, nullptr);
+    IO_STATUS_BLOCK iosb;
+    HANDLE h = nullptr;
+    NTSTATUS st = ZwCreateFile(&h, FILE_APPEND_DATA | SYNCHRONIZE, &oa, &iosb,
+                               nullptr, FILE_ATTRIBUTE_NORMAL,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               FILE_OPEN_IF, FILE_SYNCHRONOUS_IO_NONALERT,
+                               nullptr, 0);
+    if (NT_SUCCESS(st)) {
+        ZwWriteFile(h, nullptr, nullptr, nullptr, &iosb,
+                    (PVOID)text, (ULONG)strlen(text), nullptr, nullptr);
+        ZwClose(h);
+    }
+}
+
+static void Stage(const char* name, NTSTATUS st) {
+    char b[96];
+    RtlStringCchPrintfA(b, sizeof(b), "%s=%08X\r\n", name, (unsigned)st);
+    FileLog(b);
+}
+
+VOID EvtVhfReady(PVOID ctx) { UNREFERENCED_PARAMETER(ctx); }
+VOID EvtVhfWrite(PVOID ctx, VHFOPERATIONHANDLE op, PVOID opCtx, PHID_XFER_PACKET pkt) {
+    UNREFERENCED_PARAMETER(ctx); UNREFERENCED_PARAMETER(opCtx); UNREFERENCED_PARAMETER(pkt);
     VhfAsyncOperationComplete(op, STATUS_SUCCESS);
 }
+VOID EvtVhfGetFeature(PVOID ctx, VHFOPERATIONHANDLE op, PVOID opCtx, PHID_XFER_PACKET pkt) {
+    UNREFERENCED_PARAMETER(ctx); UNREFERENCED_PARAMETER(opCtx);
+    if (pkt) pkt->reportBufferLen = 0;
+    VhfAsyncOperationComplete(op, STATUS_SUCCESS);
+}
+VOID EvtVhfSetFeature(PVOID ctx, VHFOPERATIONHANDLE op, PVOID opCtx, PHID_XFER_PACKET pkt) {
+    UNREFERENCED_PARAMETER(ctx); UNREFERENCED_PARAMETER(opCtx); UNREFERENCED_PARAMETER(pkt);
+    VhfAsyncOperationComplete(op, STATUS_SUCCESS);
+}
+VOID EvtVhfGetInput(PVOID ctx, VHFOPERATIONHANDLE op, PVOID opCtx, PHID_XFER_PACKET pkt) {
+    UNREFERENCED_PARAMETER(ctx); UNREFERENCED_PARAMETER(opCtx);
+    if (pkt) pkt->reportBufferLen = 0;
+    VhfAsyncOperationComplete(op, STATUS_SUCCESS);
+}
+VOID EvtVhfCleanup(PVOID ctx) { UNREFERENCED_PARAMETER(ctx); }
 
-VOID Fido2EvtVhfWriteReport(PVOID VhfClientContext, VHFOPERATIONHANDLE VhfOperationHandle, PVOID VhfOperationContext, PHID_XFER_PACKET HidTransferPacket) {
-    UNREFERENCED_PARAMETER(VhfOperationContext);
-    UNREFERENCED_PARAMETER(VhfOperationHandle);
-    PDEVICE_CONTEXT ctx = static_cast<PDEVICE_CONTEXT>(VhfClientContext);
-    if (ctx && HidTransferPacket && HidTransferPacket->reportBuffer) {
-        ULONG n = HidTransferPacket->reportBufferLen;
-        if (n > sizeof(ctx->LastOutput)) n = sizeof(ctx->LastOutput);
-        RtlCopyMemory(ctx->LastOutput, HidTransferPacket->reportBuffer, n);
-        ctx->LastOutputLength = n;
+static NTSTATUS DispatchPnp(PDEVICE_OBJECT dev, PIRP irp) {
+    auto* ctx = (PDEVICE_CONTEXT)dev->DeviceExtension;
+    if (!ctx->Lower) {
+        irp->IoStatus.Status = STATUS_NO_SUCH_DEVICE;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+        return STATUS_NO_SUCH_DEVICE;
     }
-    VhfAsyncOperationComplete(VhfOperationHandle, STATUS_SUCCESS);
+    IoSkipCurrentIrpStackLocation(irp);
+    return IoCallDriver(ctx->Lower, irp);
 }
 
-VOID Fido2EvtVhfGetFeature(PVOID VhfClientContext, VHFOPERATIONHANDLE VhfOperationHandle, PVOID VhfOperationContext, PHID_XFER_PACKET HidTransferPacket) {
-    UNREFERENCED_PARAMETER(VhfClientContext);
-    UNREFERENCED_PARAMETER(VhfOperationContext);
-    if (HidTransferPacket) HidTransferPacket->reportBufferLen = 0;
-    VhfAsyncOperationComplete(VhfOperationHandle, STATUS_SUCCESS);
+static NTSTATUS DispatchPower(PDEVICE_OBJECT dev, PIRP irp) {
+    auto* ctx = (PDEVICE_CONTEXT)dev->DeviceExtension;
+    PoStartNextPowerIrp(irp);
+    IoSkipCurrentIrpStackLocation(irp);
+    return PoCallDriver(ctx->Lower, irp);
 }
 
-VOID Fido2EvtVhfSetFeature(PVOID VhfClientContext, VHFOPERATIONHANDLE VhfOperationHandle, PVOID VhfOperationContext, PHID_XFER_PACKET HidTransferPacket) {
-    UNREFERENCED_PARAMETER(VhfClientContext);
-    UNREFERENCED_PARAMETER(VhfOperationContext);
-    UNREFERENCED_PARAMETER(HidTransferPacket);
-    VhfAsyncOperationComplete(VhfOperationHandle, STATUS_SUCCESS);
+static NTSTATUS DispatchPass(PDEVICE_OBJECT dev, PIRP irp) {
+    auto* ctx = (PDEVICE_CONTEXT)dev->DeviceExtension;
+    IoSkipCurrentIrpStackLocation(irp);
+    return IoCallDriver(ctx->Lower, irp);
 }
 
-VOID Fido2EvtVhfGetInputReport(PVOID VhfClientContext, VHFOPERATIONHANDLE VhfOperationHandle, PVOID VhfOperationContext, PHID_XFER_PACKET HidTransferPacket) {
-    UNREFERENCED_PARAMETER(VhfClientContext);
-    UNREFERENCED_PARAMETER(VhfOperationContext);
-    if (HidTransferPacket) HidTransferPacket->reportBufferLen = 0;
-    VhfAsyncOperationComplete(VhfOperationHandle, STATUS_SUCCESS);
-}
-
-VOID Fido2EvtVhfReady(PVOID VhfClientContext) {
-    UNREFERENCED_PARAMETER(VhfClientContext);
-    // Phase 1: khong co du lieu; service se gui report sau.
-}
-
-VOID Fido2EvtVhfCleanup(PVOID VhfClientContext) {
-    UNREFERENCED_PARAMETER(VhfClientContext);
-}
-
-VOID Fido2EvtDeviceCleanup(WDFOBJECT CleanupContext) {
-    PDEVICE_CONTEXT ctx = DeviceGetContext(CleanupContext);
-    if (ctx->Vhf) {
-        VhfDelete(ctx->Vhf, TRUE);
-        ctx->Vhf = nullptr;
-    }
-}
-
-NTSTATUS Fido2EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT DeviceInit) {
-    UNREFERENCED_PARAMETER(Driver);
-
-    WDFDEVICE device = nullptr;
-    WDF_OBJECT_ATTRIBUTES attrs;
-    WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attrs, DEVICE_CONTEXT);
-    attrs.EvtCleanupCallback = Fido2EvtDeviceCleanup;
-    NTSTATUS status = WdfDeviceCreate(&DeviceInit, &attrs, &device);
+static NTSTATUS AddDevice(PDRIVER_OBJECT driver, PDEVICE_OBJECT pdo) {
+    FileLog("adddevice\r\n");
+    PDEVICE_OBJECT fdo = nullptr;
+    NTSTATUS status = IoCreateDevice(driver, sizeof(DEVICE_CONTEXT), nullptr,
+                                     FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN,
+                                     FALSE, &fdo);
+    Stage("fdo", status);
     if (!NT_SUCCESS(status)) return status;
 
-    PDEVICE_CONTEXT ctx = DeviceGetContext(device);
+    auto* ctx = (PDEVICE_CONTEXT)fdo->DeviceExtension;
     RtlZeroMemory(ctx, sizeof(*ctx));
+    ctx->Pdo = pdo;
+    ctx->Lower = IoAttachDeviceToDeviceStack(fdo, pdo);
+    Stage("attach", ctx->Lower ? STATUS_SUCCESS : STATUS_NO_SUCH_DEVICE);
+    if (!ctx->Lower) {
+        IoDeleteDevice(fdo);
+        return STATUS_NO_SUCH_DEVICE;
+    }
+    fdo->Flags &= ~DO_DEVICE_INITIALIZING;
 
+    static WCHAR instanceId[] = L"FIDO2Virtual";
+    GUID containerId = {0x7d2a6f31,0x9e4b,0x4b6e,{0x9f,0x6a,0x2f,0x0d,0x6a,0x5b,0x1c,0x01}};
     VHF_CONFIG cfg;
-    VHF_CONFIG_INIT(&cfg, WdfDeviceWdmGetDeviceObject(device),
-                    sizeof(g_ReportDescriptor), (PUCHAR)g_ReportDescriptor);
+    VHF_CONFIG_INIT(&cfg, fdo, sizeof(g_ReportDescriptor), (PUCHAR)g_ReportDescriptor);
+    cfg.InstanceID = instanceId;
+    cfg.InstanceIDLength = (USHORT)(wcslen(instanceId) * sizeof(WCHAR));
+    cfg.ContainerID = containerId;
     cfg.VendorID = FIDO2_VID;
     cfg.ProductID = FIDO2_PID;
     cfg.VersionNumber = 0x0100;
     cfg.VhfClientContext = ctx;
-    cfg.EvtVhfAsyncOperationWriteReport = Fido2EvtVhfWriteReport;
-    cfg.EvtVhfAsyncOperationGetFeature = Fido2EvtVhfGetFeature;
-    cfg.EvtVhfAsyncOperationSetFeature = Fido2EvtVhfSetFeature;
-    cfg.EvtVhfAsyncOperationGetInputReport = Fido2EvtVhfGetInputReport;
-    cfg.EvtVhfReadyForNextReadReport = Fido2EvtVhfReady;
-    cfg.EvtVhfCleanup = Fido2EvtVhfCleanup;
+    cfg.EvtVhfReadyForNextReadReport = EvtVhfReady;
+    cfg.EvtVhfAsyncOperationWriteReport = EvtVhfWrite;
+    cfg.EvtVhfAsyncOperationGetFeature = EvtVhfGetFeature;
+    cfg.EvtVhfAsyncOperationSetFeature = EvtVhfSetFeature;
+    cfg.EvtVhfAsyncOperationGetInputReport = EvtVhfGetInput;
+    cfg.EvtVhfCleanup = EvtVhfCleanup;
 
     status = VhfCreate(&cfg, &ctx->Vhf);
+    Stage("vhfcreate", status);
     if (!NT_SUCCESS(status)) {
-        ctx->Vhf = nullptr;
+        IoDetachDevice(ctx->Lower);
+        IoDeleteDevice(fdo);
         return status;
     }
     status = VhfStart(ctx->Vhf);
+    Stage("vhfstart", status);
     if (!NT_SUCCESS(status)) {
         VhfDelete(ctx->Vhf, TRUE);
         ctx->Vhf = nullptr;
+        IoDetachDevice(ctx->Lower);
+        IoDeleteDevice(fdo);
         return status;
     }
+    FileLog("ready\r\n");
+    return STATUS_SUCCESS;
+}
 
-    return WdfDeviceCreateDeviceInterface(device, &GUID_DEVINTERFACE_FIDO2_VIRTUAL, nullptr);
+static VOID DriverUnload(PDRIVER_OBJECT driver) {
+    FileLog("unload\r\n");
+    PDEVICE_OBJECT dev = driver->DeviceObject;
+    while (dev) {
+        PDEVICE_OBJECT next = dev->NextDevice;
+        auto* ctx = (PDEVICE_CONTEXT)dev->DeviceExtension;
+        if (ctx->Vhf) {
+            VhfDelete(ctx->Vhf, TRUE);
+            ctx->Vhf = nullptr;
+        }
+        if (ctx->Lower) {
+            IoDetachDevice(ctx->Lower);
+            ctx->Lower = nullptr;
+        }
+        IoDeleteDevice(dev);
+        dev = next;
+    }
 }
 
 extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registry) {
-    WDF_DRIVER_CONFIG config;
-    WDF_DRIVER_CONFIG_INIT(&config, Fido2EvtDeviceAdd);
-    return WdfDriverCreate(driver, registry, WDF_NO_OBJECT_ATTRIBUTES, &config, WDF_NO_HANDLE);
+    UNREFERENCED_PARAMETER(registry);
+    FileLog("entry\r\n");
+    driver->DriverUnload = DriverUnload;
+    driver->DriverExtension->AddDevice = AddDevice;
+    driver->MajorFunction[IRP_MJ_PNP] = DispatchPnp;
+    driver->MajorFunction[IRP_MJ_POWER] = DispatchPower;
+    driver->MajorFunction[IRP_MJ_SYSTEM_CONTROL] = DispatchPass;
+    return STATUS_SUCCESS;
 }

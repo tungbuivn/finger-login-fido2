@@ -16,11 +16,11 @@
 
 ## Phase 1 — Virtual FIDO HID device
 
-- [x] Driver WDF code tạo VHF device (compile)
-- [x] Report descriptor FIDO trong code
+- [x] WDM VHF function driver chạy
+- [x] Report descriptor FIDO, HID `UP:F1D0`
 - [ ] Input + Output report 64 byte
-- [ ] Device Manager thấy HID device
-- [ ] `hidfido` bind (nếu descriptor đúng)
+- [x] Device Manager: HID-compliant fido
+- [x] Windows HID stack nhận FIDO (không cần hidfido.sys)
 
 **Acceptance:** Windows nhận thiết bị HID FIDO; chưa cần CTAP2.
 

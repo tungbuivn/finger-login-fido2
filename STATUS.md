@@ -19,7 +19,7 @@ Cập nhật: 2026-10-30
 | WDK/`vhf.h` | Có (WDK 10.0.26100, `vhfkm.lib`) |
 | SDK/WDK | 10.0.26100.0 |
 | Visual Studio | BuildTools 2022 |
-| devcon | Có: `C:\Program Files (x86)\Windows Kits\10\Tools\10.0.26100.0\x64\devcon.exe` |\n| Driver VHF | **Compile OK** (`driver\build\fido2.sys`, 17.9 KB) |\n| Load driver | Chưa; cần reboot rồi `devcon install` |
+| devcon | Có: `C:\Program Files (x86)\Windows Kits\10\Tools\10.0.26100.0\x64\devcon.exe` |\n| Driver VHF | **Chạy OK**, HID FIDO `UP:F1D0` |\n| Load driver | **OK** — `HID-compliant fido`, service `fido2fido` |
 | Browser | Edge có; Chrome chưa thấy ở đường dẫn chuẩn |
 
 ## Việc tiếp theo
